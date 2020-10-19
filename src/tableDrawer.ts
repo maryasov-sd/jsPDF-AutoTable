@@ -49,13 +49,29 @@ export function drawTable(jsPDFDoc: jsPDFDocument, table: Table): void {
       table.head.forEach((row) => printRow(doc, table, row, cursor, table.columns))
     }
     doc.applyStyles(doc.userStyles)
-    table.body.forEach((row, index) => {
-      const isLastRow = index === table.body.length - 1
-      printFullRow(doc, table, row, isLastRow, startPos, cursor, table.columns)
-    })
+    let BreakException = {};
+    try {
+      table.body.forEach((row, index) => {
+        const isLastRow = index === table.body.length - 1
+        if ( !table.reachMaxPage)
+          printFullRow(doc, table, row, isLastRow, startPos, cursor, table.columns)
+        if (table.reachMaxPage) {
+          throw BreakException
+        }
+        if (isLastRow) {
+          table.lastRow.push(row);
+          doc.addPage()
+        }
+      })
+    } catch (e) {
+      if (e !== BreakException) throw e;
+    }
+
     doc.applyStyles(doc.userStyles)
     if (settings.showFoot === 'lastPage' || settings.showFoot === 'everyPage') {
-      table.foot.forEach((row) => printRow(doc, table, row, cursor, table.columns))
+      table.foot.forEach((row) => {
+        if (!table.reachMaxPage) {printRow(doc, table, row, cursor, table.columns)}
+      })
     }
   }
 
@@ -113,10 +129,12 @@ function printHead(
     settings.showHead === 'firstPage' ||
     settings.showHead === 'everyPage'
   ) {
-    table.head.forEach((row) => printRow(doc, table, row, cursor, columns))
+    table.head.forEach((row) => {
+      if (!table.reachMaxPage) printRow(doc, table, row, cursor, columns)
+    })
   }
 }
- 
+
 function printBody(
   doc: DocHandler,
   table: Table,
@@ -125,10 +143,23 @@ function printBody(
   columns: Column[]
 ) {
   doc.applyStyles(doc.userStyles)
-  table.body.forEach((row, index) => {
-    const isLastRow = index === table.body.length - 1
-    printFullRow(doc, table, row, isLastRow, startPos, cursor, columns)
-  })
+  let BreakException = {};
+  try {
+    table.body.forEach((row, index) => {
+      const isLastRow = index === table.body.length - 1
+      console.log('row', row)
+      if ( !table.reachMaxPage)
+        printFullRow(doc, table, row, isLastRow, startPos, cursor, columns)
+      if (table.reachMaxPage) {
+        throw BreakException
+      }
+      if (isLastRow) {
+        table.lastRow.push(row)
+      }
+    })
+  } catch (e) {
+    if (e !== BreakException) throw e;
+  }
 }
 
 function printFoot(
@@ -140,9 +171,12 @@ function printFoot(
   const settings = table.settings;
   doc.applyStyles(doc.userStyles)
   if (settings.showFoot === 'lastPage' || settings.showFoot === 'everyPage') {
-    table.foot.forEach((row) => printRow(doc, table, row, cursor, columns))
+    table.foot.forEach((row) => {
+      if (!table.reachMaxPage) printRow(doc, table, row, cursor, columns)
+    })
   }
 }
+
 
 function getRemainingLineCount(
   cell: Cell,
@@ -292,25 +326,36 @@ function printFullRow(
   columns: Column[]
 ) {
   const remainingSpace = getRemainingPageSpace(doc, table, isLastRow, cursor)
-  if (row.canEntireRowFit(remainingSpace, columns)) {
+  // console.log('r', remainingSpace, row.canEntireRowFit(remainingSpace, columns));
+  if (row.canEntireRowFit(remainingSpace, columns) && !table.reachMaxPage) {
     printRow(doc, table, row, cursor, columns)
   } else {
-    if (shouldPrintOnCurrentPage(doc, row, remainingSpace, table)) {
-      const remainderRow = modifyRowToFit(row, remainingSpace, table, doc)
-      printRow(doc, table, row, cursor, columns)
-      addPage(doc, table, startPos, cursor, columns)
-      printFullRow(
-        doc,
-        table,
-        remainderRow,
-        isLastRow,
-        startPos,
-        cursor,
-        columns
-      )
+    // console.log('pc', table.pageCount, table.settings.maxPage)
+    if (table.pageCount >= table.settings.maxPage) {
+      if (!table.reachMaxPage) {
+        table.reachMaxPage = true
+        table.lastRow.push(row)
+        addPage(doc, table, startPos, cursor, columns)
+      }
     } else {
-      addPage(doc, table, startPos, cursor, columns)
-      printFullRow(doc, table, row, isLastRow, startPos, cursor, columns)
+      if (shouldPrintOnCurrentPage(doc, row, remainingSpace, table)) {
+        const remainderRow = modifyRowToFit(row, remainingSpace, table, doc)
+        console.log('remainderRow', remainderRow);
+        printRow(doc, table, row, cursor, columns)
+        addPage(doc, table, startPos, cursor, columns)
+        printFullRow(
+          doc,
+          table,
+          remainderRow,
+          isLastRow,
+          startPos,
+          cursor,
+          columns
+        )
+      } else {
+        addPage(doc, table, startPos, cursor, columns)
+        printFullRow(doc, table, row, isLastRow, startPos, cursor, columns)
+      }
     }
   }
 }
@@ -349,7 +394,7 @@ function printRow(
 
     drawCellBorders(doc, cell, cursor)
 
-   
+
     const textPos = cell.getTextPos()
     autoTableText(
       cell.text,
@@ -446,7 +491,9 @@ export function addPage(
 ) {
   doc.applyStyles(doc.userStyles)
   if (table.settings.showFoot === 'everyPage') {
-    table.foot.forEach((row: Row) => printRow(doc, table, row, cursor, columns))
+    table.foot.forEach((row: Row) => {
+      if (!table.reachMaxPage) printRow(doc, table, row, cursor, columns)
+    })
   }
 
   // Add user content just before adding new page ensure it will
@@ -462,7 +509,8 @@ export function addPage(
   cursor.y = margin.top
 
   if (table.settings.showHead === 'everyPage') {
-    table.head.forEach((row: Row) => printRow(doc, table, row, cursor, columns))
+    table.head.forEach((row: Row) => {
+      if (!table.reachMaxPage) printRow(doc, table, row, cursor, columns)})
   }
 }
 

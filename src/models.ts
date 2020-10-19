@@ -28,6 +28,7 @@ export interface Settings {
   useCss: boolean
   theme: 'striped' | 'grid' | 'plain'
   startY: number
+  maxPage: number | false
   margin: MarginPadding
   pageBreak: 'auto' | 'avoid' | 'always'
   rowPageBreak: 'auto' | 'avoid'
@@ -74,6 +75,8 @@ export class Table {
   readonly body: Row[]
   readonly foot: Row[]
 
+  reachMaxPage = false
+  lastRow: Row[]
   pageNumber = 1
   finalY?: number
   startPageNumber?: number
@@ -93,6 +96,7 @@ export class Table {
     this.head = content.head
     this.body = content.body
     this.foot = content.foot
+    this.lastRow = []
   }
 
   getHeadHeight(columns: Column[]) {

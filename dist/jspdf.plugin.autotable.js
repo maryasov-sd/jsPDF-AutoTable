@@ -16,7 +16,7 @@
 		var a = typeof exports === 'object' ? factory((function webpackLoadOptionalExternalModule() { try { return require("jspdf"); } catch(e) {} }())) : factory(root["jspdf"]);
 		for(var i in a) (typeof exports === 'object' ? exports : root)[i] = a[i];
 	}
-})(typeof this !== 'undefined' ? this : window, function(__WEBPACK_EXTERNAL_MODULE__16__) {
+})(typeof this !== 'undefined' ? this : window, function(__WEBPACK_EXTERNAL_MODULE__17__) {
 return /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -710,7 +710,7 @@ function parseHooks(global, document, current) {
     return result;
 }
 function parseSettings(doc, options) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     var margin = common_1.parseSpacing(options.margin, 40 / doc.scaleFactor());
     var startY = (_a = getStartY(doc, options.startY)) !== null && _a !== void 0 ? _a : margin.top;
     var showFoot;
@@ -735,19 +735,22 @@ function parseSettings(doc, options) {
     }
     var useCss = (_d = options.useCss) !== null && _d !== void 0 ? _d : false;
     var theme = options.theme || (useCss ? 'plain' : 'striped');
+    var horizontalPageBreak = options.horizontalPageBreak ? true : false;
     return {
         includeHiddenHtml: (_e = options.includeHiddenHtml) !== null && _e !== void 0 ? _e : false,
         useCss: useCss,
         theme: theme,
         startY: startY,
+        maxPage: (_f = options.maxPage) !== null && _f !== void 0 ? _f : false,
         margin: margin,
-        pageBreak: (_f = options.pageBreak) !== null && _f !== void 0 ? _f : 'auto',
-        rowPageBreak: (_g = options.rowPageBreak) !== null && _g !== void 0 ? _g : 'auto',
-        tableWidth: (_h = options.tableWidth) !== null && _h !== void 0 ? _h : 'auto',
+        pageBreak: (_g = options.pageBreak) !== null && _g !== void 0 ? _g : 'auto',
+        rowPageBreak: (_h = options.rowPageBreak) !== null && _h !== void 0 ? _h : 'auto',
+        tableWidth: (_j = options.tableWidth) !== null && _j !== void 0 ? _j : 'auto',
         showHead: showHead,
         showFoot: showFoot,
-        tableLineWidth: (_j = options.tableLineWidth) !== null && _j !== void 0 ? _j : 0,
-        tableLineColor: (_k = options.tableLineColor) !== null && _k !== void 0 ? _k : 200,
+        tableLineWidth: (_k = options.tableLineWidth) !== null && _k !== void 0 ? _k : 0,
+        tableLineColor: (_l = options.tableLineColor) !== null && _l !== void 0 ? _l : 200,
+        horizontalPageBreak: horizontalPageBreak,
     };
 }
 function getStartY(doc, userStartY) {
@@ -842,6 +845,7 @@ var models_1 = __webpack_require__(8);
 var documentHandler_1 = __webpack_require__(2);
 var polyfills_1 = __webpack_require__(3);
 var autoTableText_1 = __webpack_require__(5);
+var tablePrinter_1 = __webpack_require__(15);
 function drawTable(jsPDFDoc, table) {
     var settings = table.settings;
     var startY = settings.startY;
@@ -865,18 +869,45 @@ function drawTable(jsPDFDoc, table) {
     }
     var startPos = polyfills_1.assign({}, cursor);
     table.startPageNumber = doc.pageNumber();
-    doc.applyStyles(doc.userStyles);
-    if (settings.showHead === 'firstPage' || settings.showHead === 'everyPage') {
-        table.head.forEach(function (row) { return printRow(doc, table, row, cursor); });
+    if (settings.horizontalPageBreak === true) {
+        // managed flow for split columns
+        printTableWithHorizontalPageBreak(doc, table, startPos, cursor);
     }
-    doc.applyStyles(doc.userStyles);
-    table.body.forEach(function (row, index) {
-        var isLastRow = index === table.body.length - 1;
-        printFullRow(doc, table, row, isLastRow, startPos, cursor);
-    });
-    doc.applyStyles(doc.userStyles);
-    if (settings.showFoot === 'lastPage' || settings.showFoot === 'everyPage') {
-        table.foot.forEach(function (row) { return printRow(doc, table, row, cursor); });
+    else {
+        // normal flow
+        doc.applyStyles(doc.userStyles);
+        if (settings.showHead === 'firstPage' ||
+            settings.showHead === 'everyPage') {
+            table.head.forEach(function (row) { return printRow(doc, table, row, cursor, table.columns); });
+        }
+        doc.applyStyles(doc.userStyles);
+        var BreakException_1 = {};
+        try {
+            table.body.forEach(function (row, index) {
+                var isLastRow = index === table.body.length - 1;
+                if (!table.reachMaxPage)
+                    printFullRow(doc, table, row, isLastRow, startPos, cursor, table.columns);
+                if (table.reachMaxPage) {
+                    throw BreakException_1;
+                }
+                if (isLastRow) {
+                    table.lastRow.push(row);
+                    doc.addPage();
+                }
+            });
+        }
+        catch (e) {
+            if (e !== BreakException_1)
+                throw e;
+        }
+        doc.applyStyles(doc.userStyles);
+        if (settings.showFoot === 'lastPage' || settings.showFoot === 'everyPage') {
+            table.foot.forEach(function (row) {
+                if (!table.reachMaxPage) {
+                    printRow(doc, table, row, cursor, table.columns);
+                }
+            });
+        }
     }
     common_1.addTableBorder(doc, table, startPos, cursor);
     table.callEndPageHooks(doc, cursor);
@@ -888,6 +919,68 @@ function drawTable(jsPDFDoc, table) {
     doc.applyStyles(doc.userStyles);
 }
 exports.drawTable = drawTable;
+function printTableWithHorizontalPageBreak(doc, table, startPos, cursor) {
+    // calculate width of columns and render only those which can fit into page
+    var allColumnsCanFitResult = tablePrinter_1.default.calculateAllColumnsCanFitInPage(doc, table);
+    allColumnsCanFitResult.map(function (colsAndIndexes, index) {
+        doc.applyStyles(doc.userStyles);
+        // add page to print next columns in new page
+        if (index > 0) {
+            addPage(doc, table, startPos, cursor, colsAndIndexes.columns);
+        }
+        else {
+            // print head for selected columns
+            printHead(doc, table, cursor, colsAndIndexes.columns);
+        }
+        // print body for selected columns
+        printBody(doc, table, startPos, cursor, colsAndIndexes.columns);
+        // print foot for selected columns
+        printFoot(doc, table, cursor, colsAndIndexes.columns);
+    });
+}
+function printHead(doc, table, cursor, columns) {
+    var settings = table.settings;
+    doc.applyStyles(doc.userStyles);
+    if (settings.showHead === 'firstPage' ||
+        settings.showHead === 'everyPage') {
+        table.head.forEach(function (row) {
+            if (!table.reachMaxPage)
+                printRow(doc, table, row, cursor, columns);
+        });
+    }
+}
+function printBody(doc, table, startPos, cursor, columns) {
+    doc.applyStyles(doc.userStyles);
+    var BreakException = {};
+    try {
+        table.body.forEach(function (row, index) {
+            var isLastRow = index === table.body.length - 1;
+            console.log('row', row);
+            if (!table.reachMaxPage)
+                printFullRow(doc, table, row, isLastRow, startPos, cursor, columns);
+            if (table.reachMaxPage) {
+                throw BreakException;
+            }
+            if (isLastRow) {
+                table.lastRow.push(row);
+            }
+        });
+    }
+    catch (e) {
+        if (e !== BreakException)
+            throw e;
+    }
+}
+function printFoot(doc, table, cursor, columns) {
+    var settings = table.settings;
+    doc.applyStyles(doc.userStyles);
+    if (settings.showFoot === 'lastPage' || settings.showFoot === 'everyPage') {
+        table.foot.forEach(function (row) {
+            if (!table.reachMaxPage)
+                printRow(doc, table, row, cursor, columns);
+        });
+    }
+}
 function getRemainingLineCount(cell, remainingPageSpace, doc) {
     var fontHeight = (cell.styles.fontSize / doc.scaleFactor()) * config_1.FONT_ROW_RATIO;
     var vPadding = cell.padding('vertical');
@@ -897,6 +990,7 @@ function getRemainingLineCount(cell, remainingPageSpace, doc) {
 function modifyRowToFit(row, remainingPageSpace, table, doc) {
     var cells = {};
     row.spansMultiplePages = true;
+    row.height = 0;
     var rowHeight = 0;
     for (var _i = 0, _a = table.columns; _i < _a.length; _i++) {
         var column = _a[_i];
@@ -981,28 +1075,40 @@ function shouldPrintOnCurrentPage(doc, row, remainingPageSpace, table) {
     // In all other cases print the row on current page
     return true;
 }
-function printFullRow(doc, table, row, isLastRow, startPos, cursor) {
+function printFullRow(doc, table, row, isLastRow, startPos, cursor, columns) {
     var remainingSpace = getRemainingPageSpace(doc, table, isLastRow, cursor);
-    if (row.canEntireRowFit(remainingSpace, table.columns)) {
-        printRow(doc, table, row, cursor);
+    // console.log('r', remainingSpace, row.canEntireRowFit(remainingSpace, columns));
+    if (row.canEntireRowFit(remainingSpace, columns) && !table.reachMaxPage) {
+        printRow(doc, table, row, cursor, columns);
     }
     else {
-        if (shouldPrintOnCurrentPage(doc, row, remainingSpace, table)) {
-            var remainderRow = modifyRowToFit(row, remainingSpace, table, doc);
-            printRow(doc, table, row, cursor);
-            addPage(doc, table, startPos, cursor);
-            printFullRow(doc, table, remainderRow, isLastRow, startPos, cursor);
+        // console.log('pc', table.pageCount, table.settings.maxPage)
+        if (table.pageCount >= table.settings.maxPage) {
+            if (!table.reachMaxPage) {
+                table.reachMaxPage = true;
+                table.lastRow.push(row);
+                addPage(doc, table, startPos, cursor, columns);
+            }
         }
         else {
-            addPage(doc, table, startPos, cursor);
-            printFullRow(doc, table, row, isLastRow, startPos, cursor);
+            if (shouldPrintOnCurrentPage(doc, row, remainingSpace, table)) {
+                var remainderRow = modifyRowToFit(row, remainingSpace, table, doc);
+                console.log('remainderRow', remainderRow);
+                printRow(doc, table, row, cursor, columns);
+                addPage(doc, table, startPos, cursor, columns);
+                printFullRow(doc, table, remainderRow, isLastRow, startPos, cursor, columns);
+            }
+            else {
+                addPage(doc, table, startPos, cursor, columns);
+                printFullRow(doc, table, row, isLastRow, startPos, cursor, columns);
+            }
         }
     }
 }
-function printRow(doc, table, row, cursor) {
+function printRow(doc, table, row, cursor, columns) {
     cursor.x = table.settings.margin.left;
-    for (var _i = 0, _a = table.columns; _i < _a.length; _i++) {
-        var column = _a[_i];
+    for (var _i = 0, columns_1 = columns; _i < columns_1.length; _i++) {
+        var column = columns_1[_i];
         var cell = row.cells[column.index];
         if (!cell) {
             cursor.x += column.width;
@@ -1016,11 +1122,7 @@ function printRow(doc, table, row, cursor) {
             cursor.x += column.width;
             continue;
         }
-        var cellStyles = cell.styles;
-        var fillStyle = common_1.getFillStyle(cellStyles.lineWidth, cellStyles.fillColor);
-        if (fillStyle) {
-            doc.rect(cell.x, cursor.y, cell.width, cell.height, fillStyle);
-        }
+        drawCellBorders(doc, cell, cursor);
         var textPos = cell.getTextPos();
         autoTableText_1.default(cell.text, textPos.x, textPos.y, {
             halign: cell.styles.halign,
@@ -1032,6 +1134,55 @@ function printRow(doc, table, row, cursor) {
     }
     cursor.y += row.height;
 }
+function drawCellBorders(doc, cell, cursor) {
+    var cellStyles = cell.styles;
+    if (typeof cellStyles.lineWidth === 'number') {
+        // prints normal cell border
+        var fillStyle = common_1.getFillStyle(cellStyles.lineWidth, cellStyles.fillColor);
+        if (fillStyle) {
+            doc.rect(cell.x, cursor.y, cell.width, cell.height, fillStyle);
+        }
+    }
+    else if (typeof cellStyles.lineWidth === 'object') {
+        var sides = Object.keys(cellStyles.lineWidth);
+        var lineWidth_1 = cellStyles.lineWidth;
+        sides.map(function (side) {
+            var fillStyle = common_1.getFillStyle(lineWidth_1[side], cellStyles.fillColor);
+            drawBorderForSide(doc, cell, cursor, side, fillStyle || 'S', lineWidth_1[side]);
+        });
+    }
+}
+function drawBorderForSide(doc, cell, cursor, side, fillStyle, lineWidth) {
+    var x1, y1, x2, y2;
+    switch (side) {
+        case 'top':
+            x1 = cursor.x;
+            y1 = cursor.y;
+            x2 = cursor.x + cell.width;
+            y2 = cursor.y;
+            break;
+        case 'left':
+            x1 = cursor.x;
+            y1 = cursor.y;
+            x2 = cursor.x;
+            y2 = cursor.y + cell.height;
+            break;
+        case 'right':
+            x1 = cursor.x + cell.width;
+            y1 = cursor.y;
+            x2 = cursor.x + cell.width;
+            y2 = cursor.y + cell.height;
+            break;
+        default: // default it will print bottom
+            x1 = cursor.x;
+            y1 = cursor.y + cell.height;
+            x2 = cursor.x + cell.width;
+            y2 = cursor.y + cell.height;
+            break;
+    }
+    doc.getDocument().setLineWidth(lineWidth);
+    doc.getDocument().line(x1, y1, x2, y2, fillStyle);
+}
 function getRemainingPageSpace(doc, table, isLastRow, cursor) {
     var bottomContentHeight = table.settings.margin.bottom;
     var showFoot = table.settings.showFoot;
@@ -1040,10 +1191,14 @@ function getRemainingPageSpace(doc, table, isLastRow, cursor) {
     }
     return doc.pageSize().height - cursor.y - bottomContentHeight;
 }
-function addPage(doc, table, startPos, cursor) {
+function addPage(doc, table, startPos, cursor, columns) {
+    if (columns === void 0) { columns = []; }
     doc.applyStyles(doc.userStyles);
     if (table.settings.showFoot === 'everyPage') {
-        table.foot.forEach(function (row) { return printRow(doc, table, row, cursor); });
+        table.foot.forEach(function (row) {
+            if (!table.reachMaxPage)
+                printRow(doc, table, row, cursor, columns);
+        });
     }
     // Add user content just before adding new page ensure it will
     // be drawn above other things on the page
@@ -1056,7 +1211,10 @@ function addPage(doc, table, startPos, cursor) {
     cursor.x = margin.left;
     cursor.y = margin.top;
     if (table.settings.showHead === 'everyPage') {
-        table.head.forEach(function (row) { return printRow(doc, table, row, cursor); });
+        table.head.forEach(function (row) {
+            if (!table.reachMaxPage)
+                printRow(doc, table, row, cursor, columns);
+        });
     }
 }
 exports.addPage = addPage;
@@ -1083,6 +1241,7 @@ var HookData_1 = __webpack_require__(14);
 var common_1 = __webpack_require__(0);
 var Table = /** @class */ (function () {
     function Table(input, content) {
+        this.reachMaxPage = false;
         this.pageNumber = 1;
         // Deprecated, use pageNumber instead
         // Not using getter since:
@@ -1096,6 +1255,7 @@ var Table = /** @class */ (function () {
         this.head = content.head;
         this.body = content.body;
         this.foot = content.foot;
+        this.lastRow = [];
     }
     Table.prototype.getHeadHeight = function (columns) {
         return this.head.reduce(function (acc, row) { return acc + row.getMaxCellHeight(columns); }, 0);
@@ -1302,7 +1462,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createTable = void 0;
 var documentHandler_1 = __webpack_require__(2);
 var models_1 = __webpack_require__(8);
-var widthCalculator_1 = __webpack_require__(15);
+var widthCalculator_1 = __webpack_require__(16);
 var config_1 = __webpack_require__(1);
 var polyfills_1 = __webpack_require__(3);
 function createTable(jsPDFDoc, input) {
@@ -1488,7 +1648,7 @@ function __drawTable(d, table) {
 exports.__drawTable = __drawTable;
 try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
-    var jsPDF = __webpack_require__(16);
+    var jsPDF = __webpack_require__(17);
     // Webpack imported jspdf instead of jsPDF for some reason 
     // while it seemed to work everywhere else.
     if (jsPDF.jsPDF)
@@ -1906,6 +2066,68 @@ exports.CellHookData = CellHookData;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", { value: true });
+// get columns can be fit into page
+var getColumnsCanFitInPage = function (doc, table, config) {
+    if (config === void 0) { config = {}; }
+    // get page width
+    var margins = table.settings.margin;
+    var availablePageWidth = doc.pageSize().width - (margins.left + margins.right);
+    var remainingWidth = availablePageWidth;
+    var cols = [];
+    var columns = [];
+    var len = table.columns.length;
+    var i = config && config.start ? config.start : 0;
+    while (i < len) {
+        var colWidth = table.columns[i].wrappedWidth;
+        if (remainingWidth < colWidth) {
+            // check if it's first column in the sequence then add it into result
+            if (i === 0 || i === config.start) {
+                cols.push(i);
+                columns.push(table.columns[i]);
+            }
+            // can't print more columns in same page
+            break;
+        }
+        cols.push(i);
+        columns.push(table.columns[i]);
+        remainingWidth = remainingWidth - colWidth;
+        i++;
+    }
+    return { colIndexes: cols, columns: columns };
+};
+var calculateAllColumnsCanFitInPage = function (doc, table) {
+    // const margins = table.settings.margin;
+    // const availablePageWidth = doc.pageSize().width - (margins.left + margins.right);
+    var allResults = [];
+    var index = 0;
+    var len = table.columns.length;
+    while (index < len) {
+        var result = getColumnsCanFitInPage(doc, table, {
+            start: index === 0 ? 0 : index,
+        });
+        if (result && result.columns && result.columns.length) {
+            index += result.columns.length;
+            allResults.push(result);
+        }
+        else {
+            index++;
+        }
+    }
+    return allResults;
+};
+exports.default = {
+    getColumnsCanFitInPage: getColumnsCanFitInPage,
+    calculateAllColumnsCanFitInPage: calculateAllColumnsCanFitInPage,
+};
+
+
+/***/ }),
+/* 16 */
+/***/ (function(module, exports, __webpack_require__) {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", { value: true });
 exports.ellipsize = exports.resizeColumns = exports.calculateWidths = void 0;
 var common_1 = __webpack_require__(0);
 /**
@@ -1941,7 +2163,7 @@ function calculateWidths(doc, table) {
         resizeWidth = resizeColumns(resizableColumns, resizeWidth, function (column) { return column.minWidth; });
     }
     resizeWidth = Math.abs(resizeWidth);
-    if (resizeWidth > 0.1 / doc.scaleFactor()) {
+    if (!table.settings.horizontalPageBreak && resizeWidth > 0.1 / doc.scaleFactor()) {
         // Table can't get smaller due to custom-width or minWidth restrictions
         // We can't really do much here. Up to user to for example
         // reduce font size, increase page size or remove custom cell widths
@@ -2196,11 +2418,11 @@ function ellipsizeStr(text, width, styles, doc, overflow) {
 
 
 /***/ }),
-/* 16 */
+/* 17 */
 /***/ (function(module, exports) {
 
-if(typeof __WEBPACK_EXTERNAL_MODULE__16__ === 'undefined') {var e = new Error("Cannot find module 'undefined'"); e.code = 'MODULE_NOT_FOUND'; throw e;}
-module.exports = __WEBPACK_EXTERNAL_MODULE__16__;
+if(typeof __WEBPACK_EXTERNAL_MODULE__17__ === 'undefined') {var e = new Error("Cannot find module 'undefined'"); e.code = 'MODULE_NOT_FOUND'; throw e;}
+module.exports = __WEBPACK_EXTERNAL_MODULE__17__;
 
 /***/ })
 /******/ ]);

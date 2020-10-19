@@ -137,6 +137,7 @@ function parseSettings(doc: DocHandler, options: UserOptions): Settings {
     useCss,
     theme,
     startY,
+    maxPage: options.maxPage ?? false,
     margin,
     pageBreak: options.pageBreak ?? 'auto',
     rowPageBreak: options.rowPageBreak ?? 'auto',

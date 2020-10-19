@@ -34,6 +34,7 @@ export interface UserOptions {
   useCss?: boolean
   theme?: 'striped' | 'grid' | 'plain' | null
   startY?: number | false
+  maxPage?: number | false
   margin?: MarginPaddingInput
   pageBreak?: 'auto' | 'avoid' | 'always'
   rowPageBreak?: 'auto' | 'avoid'

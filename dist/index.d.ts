@@ -83,6 +83,7 @@ export interface Settings {
 	useCss: boolean;
 	theme: "striped" | "grid" | "plain";
 	startY: number;
+	maxPage: number | false;
 	margin: MarginPadding;
 	pageBreak: "auto" | "avoid" | "always";
 	rowPageBreak: "auto" | "avoid";
@@ -91,6 +92,7 @@ export interface Settings {
 	showFoot: "everyPage" | "lastPage" | "never";
 	tableLineWidth: number;
 	tableLineColor: Color;
+	horizontalPageBreak?: boolean;
 }
 export interface StylesProps {
 	styles: Partial<Styles>;
@@ -117,6 +119,8 @@ declare class Table {
 	readonly head: Row[];
 	readonly body: Row[];
 	readonly foot: Row[];
+	reachMaxPage: boolean;
+	lastRow: Row[];
 	pageNumber: number;
 	finalY?: number;
 	startPageNumber?: number;
@@ -186,6 +190,12 @@ declare class Column {
 	constructor(dataKey: string | number, raw: ColumnInput | null, index: number);
 	getMaxCustomCellWidth(table: Table): number;
 }
+export interface LineWidths {
+	"bottom": number;
+	"top": number;
+	"left": number;
+	"right": number;
+}
 export interface Styles {
 	font: "helvetica" | "times" | "courier" | string;
 	fontStyle: "normal" | "bold" | "italic" | "bolditalic";
@@ -197,7 +207,7 @@ export interface Styles {
 	fontSize: number;
 	cellPadding: MarginPaddingInput;
 	lineColor: Color;
-	lineWidth: number;
+	lineWidth: number | Partial<LineWidths>;
 	cellWidth: "auto" | "wrap" | number;
 	minCellHeight: number;
 	minCellWidth: number;
@@ -207,6 +217,7 @@ export interface UserOptions {
 	useCss?: boolean;
 	theme?: "striped" | "grid" | "plain" | null;
 	startY?: number | false;
+	maxPage?: number | false;
 	margin?: MarginPaddingInput;
 	pageBreak?: "auto" | "avoid" | "always";
 	rowPageBreak?: "auto" | "avoid";
@@ -221,6 +232,7 @@ export interface UserOptions {
 	foot?: RowInput[];
 	html?: string | HTMLTableElement;
 	columns?: ColumnInput[];
+	horizontalPageBreak?: boolean;
 	styles?: Partial<Styles>;
 	bodyStyles?: Partial<Styles>;
 	headStyles?: Partial<Styles>;
